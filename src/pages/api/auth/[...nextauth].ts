@@ -1,35 +1,26 @@
-import NextAuth from 'next-auth'
+import NextAuth, { Session } from 'next-auth'
+import { JWT } from 'next-auth/jwt/types'
 import SpotifyProvider from 'next-auth/providers/spotify'
 
-// ref: https://next-auth.js.org/v3/tutorials/refresh-token-rotation
-/**
- * Takes a token, and returns a new token with updated
- * `accessToken` and `accessTokenExpires`. If an error occurs,
- * returns the old token and an error property
- */
-async function refreshAccessToken(token: any) {
+// ref: https://authjs.dev/guides/basics/refresh-token-rotation
+async function refreshAccessToken(token: JWT) {
   try {
-    const url =
-      'https://accounts.spotify.com/api/token?' +
-      new URLSearchParams({
-        client_id: process.env.SPOTIFY_CLIENT_ID || '',
-        client_secret: process.env.SPOTIFY_CLIENT_SECRET || '',
-        grant_type: 'refresh_token',
-        refresh_token: token.refreshToken,
-      })
-
-    const response = await fetch(url, {
+    const response = await fetch('https://accounts.spotify.com/api/token', {
       headers: {
         'Content-Type': 'application/x-www-form-urlencoded',
       },
+      body: new URLSearchParams({
+        client_id: process.env.SPOTIFY_CLIENT_ID,
+        client_secret: process.env.SPOTIFY_CLIENT_SECRET,
+        grant_type: 'refresh_token',
+        refresh_token: token.refreshToken,
+      }),
       method: 'POST',
     })
 
     const refreshedTokens = await response.json()
 
-    if (!response.ok) {
-      throw refreshedTokens
-    }
+    if (!response.ok) throw refreshedTokens
 
     return {
       ...token,
@@ -38,7 +29,7 @@ async function refreshAccessToken(token: any) {
       refreshToken: refreshedTokens.refresh_token ?? token.refreshToken, // Fall back to old refresh token
     }
   } catch (error) {
-    console.log(error)
+    console.error(error)
 
     return {
       ...token,
@@ -47,11 +38,12 @@ async function refreshAccessToken(token: any) {
   }
 }
 
-export const authOptions: any = {
+export default NextAuth({
+  // ref: https://next-auth.js.org/configuration/options#options
   providers: [
     SpotifyProvider({
-      clientId: process.env.SPOTIFY_CLIENT_ID || '',
-      clientSecret: process.env.SPOTIFY_CLIENT_SECRET || '',
+      clientId: process.env.SPOTIFY_CLIENT_ID,
+      clientSecret: process.env.SPOTIFY_CLIENT_SECRET,
       authorization: {
         url: 'https://accounts.spotify.com/authorize',
         // ref: https://developer.spotify.com/documentation/general/guides/authorization/code-flow/
@@ -70,31 +62,20 @@ export const authOptions: any = {
     }),
   ],
   callbacks: {
-    async jwt({ token, user, account }: { token: any; user: any; account: any }) {
-      // Initial sign in
-      if (account && user) {
-        return {
-          accessToken: account.access_token,
-          accessTokenExpires: Date.now() + account.expires_in * 1000,
-          refreshToken: account.refresh_token,
-          user,
-        }
+    async jwt({ token, account }) {
+      if (account?.access_token && account?.refresh_token && account?.expires_at) {
+        token.accessToken = account.access_token
+        token.refreshToken = account.refresh_token
+        token.accessTokenExpires = account.expires_at * 1000
+        return token
       }
-
-      // Return previous token if the access token has not expired yet
-      // Access token has expired, try to update it
       return Date.now() < token.accessTokenExpires ? token : refreshAccessToken(token)
     },
-    async session({ session, token }: { session: any; token: any }) {
-      if (token) {
-        session.user = token.user
-        session.accessToken = token.accessToken
-        session.error = token.error
-      }
-
+    async session({ session, token }: { session: Session; token: JWT }) {
+      session.accessToken = token.accessToken
+      session.accessTokenExpires = token.accessTokenExpires
+      session.refreshToken = token.refreshToken
       return session
     },
   },
-}
-
-export default NextAuth(authOptions)
+})
