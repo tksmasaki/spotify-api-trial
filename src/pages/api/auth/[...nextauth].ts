@@ -1,5 +1,5 @@
 import NextAuth, { Session } from 'next-auth'
-import { JWT } from 'next-auth/jwt/types'
+import { JWT } from 'next-auth/jwt'
 import SpotifyProvider from 'next-auth/providers/spotify'
 
 // ref: https://authjs.dev/guides/basics/refresh-token-rotation
@@ -72,9 +72,7 @@ export default NextAuth({
       return Date.now() < token.accessTokenExpires ? token : refreshAccessToken(token)
     },
     async session({ session, token }: { session: Session; token: JWT }) {
-      session.accessToken = token.accessToken
-      session.accessTokenExpires = token.accessTokenExpires
-      session.refreshToken = token.refreshToken
+      session.token = token
       return session
     },
   },
